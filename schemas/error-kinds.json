@@ -1,0 +1,49 @@
+{
+  "description": "Every error kind, with the code an error of that kind carries when none is given and the status each transport reports it as. Generate client types and message catalogues from this rather than transcribing it. Kept in step with the C# constants by a test, so a change here that is not a change there fails the build.",
+  "canonicalCodeSet": "google.rpc.Code",
+  "kinds": [
+    { "kind": "cancelled", "defaultCode": "CANCELLED", "httpStatus": 499, "grpcStatus": 1, "canonicalName": "CANCELLED", "title": "Request cancelled" },
+    { "kind": "unknown", "defaultCode": "UNKNOWN", "httpStatus": 500, "grpcStatus": 2, "canonicalName": "UNKNOWN", "title": "Unknown error" },
+    { "kind": "validation", "defaultCode": "VALIDATION", "httpStatus": 400, "grpcStatus": 3, "canonicalName": "INVALID_ARGUMENT", "title": "Validation failed" },
+    { "kind": "timeout", "defaultCode": "TIMEOUT", "httpStatus": 504, "grpcStatus": 4, "canonicalName": "DEADLINE_EXCEEDED", "title": "Request timed out" },
+    { "kind": "not_found", "defaultCode": "NOT_FOUND", "httpStatus": 404, "grpcStatus": 5, "canonicalName": "NOT_FOUND", "title": "Not found" },
+    { "kind": "already_exists", "defaultCode": "ALREADY_EXISTS", "httpStatus": 409, "grpcStatus": 6, "canonicalName": "ALREADY_EXISTS", "title": "Already exists" },
+    { "kind": "access_denied", "defaultCode": "ACCESS_DENIED", "httpStatus": 403, "grpcStatus": 7, "canonicalName": "PERMISSION_DENIED", "title": "Access denied" },
+    { "kind": "not_authenticated", "defaultCode": "NOT_AUTHENTICATED", "httpStatus": 401, "grpcStatus": 16, "canonicalName": "UNAUTHENTICATED", "title": "Not authenticated" },
+    { "kind": "resource_exhausted", "defaultCode": "RESOURCE_EXHAUSTED", "httpStatus": 429, "grpcStatus": 8, "canonicalName": "RESOURCE_EXHAUSTED", "title": "Resource exhausted" },
+    { "kind": "precondition_failed", "defaultCode": "PRECONDITION_FAILED", "httpStatus": 412, "grpcStatus": 9, "canonicalName": "FAILED_PRECONDITION", "title": "Precondition failed" },
+    { "kind": "aborted", "defaultCode": "ABORTED", "httpStatus": 409, "grpcStatus": 10, "canonicalName": "ABORTED", "title": "Aborted" },
+    { "kind": "out_of_range", "defaultCode": "OUT_OF_RANGE", "httpStatus": 416, "grpcStatus": 11, "canonicalName": "OUT_OF_RANGE", "title": "Out of range" },
+    { "kind": "not_implemented", "defaultCode": "NOT_IMPLEMENTED", "httpStatus": 501, "grpcStatus": 12, "canonicalName": "UNIMPLEMENTED", "title": "Not implemented" },
+    { "kind": "internal", "defaultCode": "INTERNAL", "httpStatus": 500, "grpcStatus": 13, "canonicalName": "INTERNAL", "title": "Internal error" },
+    { "kind": "unavailable", "defaultCode": "UNAVAILABLE", "httpStatus": 503, "grpcStatus": 14, "canonicalName": "UNAVAILABLE", "title": "Service unavailable" },
+    { "kind": "data_loss", "defaultCode": "DATA_LOSS", "httpStatus": 500, "grpcStatus": 15, "canonicalName": "DATA_LOSS", "title": "Data loss" }
+  ],
+  "canonicalKindForHttpStatus": {
+    "400": "validation",
+    "401": "not_authenticated",
+    "403": "access_denied",
+    "404": "not_found",
+    "409": "already_exists",
+    "412": "precondition_failed",
+    "416": "out_of_range",
+    "429": "resource_exhausted",
+    "499": "cancelled",
+    "500": "internal",
+    "501": "not_implemented",
+    "503": "unavailable",
+    "504": "timeout"
+  },
+  "httpStatusFallback": {
+    "description": "How a client classifies a status with no entry above, which happens whenever a response carries no error document at all — a framework-issued 401 challenge, a routing 404, a proxy's 502.",
+    "clientError": "validation",
+    "serverError": "internal",
+    "otherwise": "unknown"
+  },
+  "rules": {
+    "kindPattern": "^[a-z][a-z0-9_]*$",
+    "codePattern": "^[A-Z][A-Z0-9_]*$",
+    "kindsAreOpen": "A service may report a kind of its own, outside this set. A client that does not recognise a kind should treat it by its status.",
+    "switchOn": "Switch on kind to decide behaviour, and on code to decide the text shown. Never parse message, which is neither localised nor stable."
+  }
+}

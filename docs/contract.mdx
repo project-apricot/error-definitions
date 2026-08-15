@@ -1,0 +1,135 @@
+---
+title: Contract
+description: The wire format in full — the problem document, the kind and code rules, the status mappings, and the published schemas.
+---
+
+# Contract
+
+This page is the part other services and their clients depend on. Everything below is fixed: changing
+any of it is a major version, not an edit.
+
+## The document
+
+Served as `application/problem+json`, which is how a client tells a real error document from a proxy's
+HTML error page.
+
+```jsonc
+{
+  "type": "about:blank",              // always; this contract identifies a problem by kind and code
+  "title": "Validation failed",       // a summary of the kind, not localised
+  "status": 400,                      // mirrors the status line
+  "detail": "That locale is not published.",   // the first error's message, when it has one
+  "instance": "/api/content",         // the request path, never the query string
+  "errors": [
+    {
+      "kind": "validation",                    // what class of thing went wrong
+      "code": "CONTENT_INVALID_LOCALE",        // which specific thing
+      "message": "That locale is not published.",
+      "payload": { "locale": "fr", "allowed": ["en", "hy"] }
+    }
+  ]
+}
+```
+
+`errors` always has at least one entry, and the first one decides `status`, `title` and `detail`.
+`detail`, `instance` and `payload` are omitted when there is nothing to put in them, rather than sent
+as null.
+
+Member names are pinned by attribute and written through the library's own serializer, so a service
+that changes its own JSON naming policy does not change what other services receive from it.
+
+## Rules
+
+| | Rule | Example |
+| --- | --- | --- |
+| `kind` | lower snake case, `^[a-z][a-z0-9_]*$` | `not_found` |
+| `code` | upper snake case, `^[A-Z][A-Z0-9_]*$` | `CONTENT_INVALID_LOCALE` |
+| `payload` keys | sent exactly as written, no naming policy | `locale` |
+
+The code rule is what Google's API guidelines require of the equivalent field (`ErrorInfo.reason`), so a
+code carries over to a gRPC representation unchanged.
+
+## Kinds, codes and statuses
+
+| Kind | Default code | Canonical | HTTP | gRPC |
+| --- | --- | --- | --- | --- |
+| `cancelled` | `CANCELLED` | `CANCELLED` | 499 | 1 |
+| `unknown` | `UNKNOWN` | `UNKNOWN` | 500 | 2 |
+| `validation` | `VALIDATION` | `INVALID_ARGUMENT` | 400 | 3 |
+| `timeout` | `TIMEOUT` | `DEADLINE_EXCEEDED` | 504 | 4 |
+| `not_found` | `NOT_FOUND` | `NOT_FOUND` | 404 | 5 |
+| `already_exists` | `ALREADY_EXISTS` | `ALREADY_EXISTS` | 409 | 6 |
+| `access_denied` | `ACCESS_DENIED` | `PERMISSION_DENIED` | 403 | 7 |
+| `not_authenticated` | `NOT_AUTHENTICATED` | `UNAUTHENTICATED` | 401 | 16 |
+| `resource_exhausted` | `RESOURCE_EXHAUSTED` | `RESOURCE_EXHAUSTED` | 429 | 8 |
+| `precondition_failed` | `PRECONDITION_FAILED` | `FAILED_PRECONDITION` | 412 | 9 |
+| `aborted` | `ABORTED` | `ABORTED` | 409 | 10 |
+| `out_of_range` | `OUT_OF_RANGE` | `OUT_OF_RANGE` | 416 | 11 |
+| `not_implemented` | `NOT_IMPLEMENTED` | `UNIMPLEMENTED` | 501 | 12 |
+| `internal` | `INTERNAL` | `INTERNAL` | 500 | 13 |
+| `unavailable` | `UNAVAILABLE` | `UNAVAILABLE` | 503 | 14 |
+| `data_loss` | `DATA_LOSS` | `DATA_LOSS` | 500 | 15 |
+
+The default code is what an error carries when the service names none. A client's catalogue needs an entry
+for every one, as well as for the service's own codes, or a plain not-found displays as an unknown error.
+
+A kind outside this set is allowed and reported as 500, since only these sixteen have a status. It still
+travels intact in `errors[0].kind`, so a client that knows it can act on it; a client that does not should
+treat it by its status. An endpoint that needs a particular status writes the response itself rather than
+relying on the mapping.
+
+## Reading a status back
+
+Several kinds share a status, so the reverse direction picks one canonical kind per status:
+
+| Status | Reads back as | Status | Reads back as |
+| --- | --- | --- | --- |
+| 400 | `validation` | 429 | `resource_exhausted` |
+| 401 | `not_authenticated` | 499 | `cancelled` |
+| 403 | `access_denied` | 500 | `internal` |
+| 404 | `not_found` | 501 | `not_implemented` |
+| 409 | `already_exists` | 503 | `unavailable` |
+| 412 | `precondition_failed` | 504 | `timeout` |
+| 416 | `out_of_range` | | |
+
+Anything else: a 4xx reads as `validation`, a 5xx as `internal`, and any other status as `unknown`.
+
+## Three departures worth knowing
+
+- **`type` is always `about:blank`** — the library claims no documentation URI, and inventing one would
+  bake a hostname into a frozen contract. A problem is identified by its kind and code.
+- **`title` describes the kind, not the HTTP status phrase.** "Validation failed" is more use than "Bad
+  Request"; a client needing precision reads `kind`.
+- **`499` for `cancelled`** is an nginx convention rather than a registered code, used because reporting a
+  caller's own disconnect as a server error makes 500 rates unreadable.
+
+## What is not standardised
+
+Responses the framework writes itself are left alone: an authentication challenge, an authorisation
+forbid, a routing miss, a model-binding rejection, a rate-limiter rejection. Those carry no `errors`
+array, and often no body at all.
+
+A choice, not an omission: a cookie or OIDC challenge is a redirect, a bearer challenge carries
+`WWW-Authenticate` semantics a client is meant to read, and an OAuth error body follows its own
+specification. Rewriting them into one shape would break all three.
+
+A client therefore has to handle a failed response with no document — which the core's reader does, by
+classifying from the status.
+
+> **Warning.** One of those responses is served under the *same* media type as this contract. ASP.NET's
+> `[ApiController]` model-binding failure is `application/problem+json` with `errors` as an **object**
+> keyed by field, where this contract has an **array**. A client that only checks for the presence of an
+> `errors` member will mis-read it. Check that `errors` is an array, which is what the reader does — it
+> declines the object and classifies from the status instead.
+
+## Published schemas
+
+`schemas/` in the repository holds the same contract in machine-readable form:
+
+| File | Contains |
+| --- | --- |
+| `error-kinds.json` | every kind with its default code, both statuses, its canonical `google.rpc.Code` name and its title, plus the reverse mapping and the fallback rules |
+| `error-problem-details.schema.json` | JSON Schema 2020-12 for the document, with worked examples |
+
+Generate client types and catalogues from those rather than transcribing the tables above. A test asserts
+they agree with the library, so drift fails the build.

@@ -1,0 +1,8 @@
+{
+  "title": "Error Definitions",
+  "description": "The error contract services and their clients share: the classification vocabulary, the code and status mappings, and the JSON Schema of the problem document.",
+  "files": [
+    "error-kinds.json",
+    "error-problem-details.schema.json"
+  ]
+}
