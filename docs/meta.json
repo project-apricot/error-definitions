@@ -1,0 +1,5 @@
+{
+  "title": "Error Definitions",
+  "description": "One error contract for a fleet of services: a canonical classification, RFC 9457 problem documents, and a reader for consuming another service's failures.",
+  "pages": ["index", "usage", "contract", "aspnetcore"]
+}

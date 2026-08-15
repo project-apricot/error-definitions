@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://projectapricot.dev/schemas/error-problem-details.schema.json",
+  "title": "ErrorProblemDetails",
+  "description": "The document a service sends when an operation fails: an RFC 9457 problem detail whose errors member carries the classified errors. Served as application/problem+json, which is how a client tells it from a gateway's error page.",
+  "type": "object",
+  "required": ["status", "errors"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "format": "uri-reference",
+      "default": "about:blank",
+      "description": "The problem type. Always about:blank, since this contract identifies a problem by the kind and code of its errors rather than by a documentation URI."
+    },
+    "title": {
+      "type": "string",
+      "description": "A short summary of the error kind. Describes the type rather than the occurrence, and is not localised — render from a code instead."
+    },
+    "status": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 599,
+      "description": "The HTTP status of the response, mirroring the status line. Taken from the first error's kind."
+    },
+    "detail": {
+      "type": "string",
+      "description": "The first error's message, when it has one. Never the text of an unhandled exception."
+    },
+    "instance": {
+      "type": "string",
+      "format": "uri-reference",
+      "description": "The request path. Never includes the query string."
+    },
+    "errors": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The classified errors, most significant first. The first one decides the status and title.",
+      "items": { "$ref": "#/$defs/errorDefinition" }
+    }
+  },
+  "$defs": {
+    "errorDefinition": {
+      "type": "object",
+      "title": "ErrorDefinition",
+      "required": ["kind", "code", "message"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "What class of thing went wrong. Normally one of the sixteen below; a service may report a kind of its own, so treat this as an open set and fall back to the status.",
+          "examples": [
+            "cancelled",
+            "unknown",
+            "validation",
+            "timeout",
+            "not_found",
+            "already_exists",
+            "access_denied",
+            "not_authenticated",
+            "resource_exhausted",
+            "precondition_failed",
+            "aborted",
+            "out_of_range",
+            "not_implemented",
+            "internal",
+            "unavailable",
+            "data_loss"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "Which specific error it was. The key a client renders text from, so a catalogue needs an entry for every code a service can send, including the per-kind defaults in error-kinds.json.",
+          "examples": ["NOT_FOUND", "CONTENT_INVALID_LOCALE", "PAY_INVALID_PAYMENT_METHOD"]
+        },
+        "message": {
+          "type": "string",
+          "description": "A description for whoever reads the response directly. Present but often empty. Neither localised nor stable, so never parse it and never show it to an end user."
+        },
+        "payload": {
+          "type": ["object", "null"],
+          "description": "The parameters of the error: the values a client substitutes into the text it renders for the code, such as the offending field or a limit that was exceeded. Keys are sent exactly as the service wrote them.",
+          "additionalProperties": true,
+          "examples": [{ "locale": "xx" }, { "field": "email" }, { "limit": 100 }]
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true,
+  "examples": [
+    {
+      "type": "about:blank",
+      "title": "Validation failed",
+      "status": 400,
+      "detail": "The locale is invalid",
+      "instance": "/api/content",
+      "errors": [
+        {
+          "kind": "validation",
+          "code": "CONTENT_INVALID_LOCALE",
+          "message": "The locale is invalid",
+          "payload": { "locale": "xx" }
+        }
+      ]
+    },
+    {
+      "type": "about:blank",
+      "title": "Not found",
+      "status": 404,
+      "errors": [{ "kind": "not_found", "code": "NOT_FOUND", "message": "" }]
+    }
+  ]
+}

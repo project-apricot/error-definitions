@@ -1,0 +1,61 @@
+---
+title: Error Definitions
+description: What an error contract is for, what the two packages contain, and the vocabulary they share.
+---
+
+# Error Definitions
+
+A service that fails has to say three things: what class of thing went wrong, which specific thing it was,
+and enough detail for the caller to act. Doing that consistently across a fleet is the problem — one
+service answering `{"error":"not found"}` and another `{"message":"missing"}` means every client grows its
+own parsing, and the parsings drift.
+
+This library fixes the shape of that answer. A service throws a classified error; the ASP.NET integration
+turns it into an RFC 9457 problem document; another service reads it back as the same typed errors,
+whether or not the peer is one of yours.
+
+## The two packages
+
+| Package | Contains | Depends on |
+| --- | --- | --- |
+| `ApricotFramework.ErrorDefinitions` | the classification, the factories, the exception, precondition helpers, the multi-error collector, the status mappings, the problem document and the reader for it | nothing |
+| `ApricotFramework.ErrorDefinitions.AspNetCore` | the exception handler, the mapper registry, one option | the framework only |
+
+The core is enough on its own: a worker, a console app or a gRPC service can classify, throw, inspect and
+read errors without referencing ASP.NET.
+
+## The vocabulary
+
+Sixteen kinds, which are the sixteen non-OK codes of `google.rpc.Code` under names that read better over
+HTTP — `validation` for `INVALID_ARGUMENT`, `timeout` for `DEADLINE_EXCEEDED`, `access_denied` for
+`PERMISSION_DENIED`, `not_authenticated` for `UNAUTHENTICATED`, `not_implemented` for `UNIMPLEMENTED`, and
+eleven that share their canonical name.
+
+That matters twice: the same classification maps onto gRPC with no second table, and the vocabulary was
+designed elsewhere and has already survived a large fleet. The full table, with each kind's default code
+and both statuses, is on the [Contract](contract) page.
+
+> **Note.** The set is open: a service may report a kind of its own, which travels intact and is reported
+> as 500. What it cannot do is change what one of these sixteen means — that is the part every other
+> service relies on.
+
+## Kind or code?
+
+Both, for different jobs.
+
+- **Switch on `kind` to decide behaviour** — retry, re-authenticate, highlight a field, give up. Sixteen
+  of them, stable, so a client writes that `switch` once.
+- **Switch on `code` to decide text** — it identifies the specific error, so it is the key into a message
+  catalogue.
+- **Never parse `message`.** It is for whoever reads the response directly: a log, a proxy, an API
+  console. Not localised, not stable.
+
+## What it does not do
+
+Only failures that travel as exceptions are standardised. A response the framework writes itself — a
+challenge, an authorisation forbid, a routing miss, a model-binding rejection — is left as it was, because
+a challenge may be a redirect to an identity provider and an OAuth endpoint's error body follows its own
+specification. Flattening those into one shape would break them.
+
+That gap is closed on the reading side instead: a caller gets a classified error from any failed response,
+falling back to the status code when there is no document to read. See [Usage](usage).

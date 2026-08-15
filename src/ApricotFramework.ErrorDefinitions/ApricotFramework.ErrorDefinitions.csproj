@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Zero-dependency error definitions for .NET: a canonical set of error kinds mapped to HTTP and gRPC status codes, RFC 9457 problem+json responses that carry one or many classified errors, and a tolerant reader for consuming another service's errors.</Description>
+    <PackageTags>error-handling;problem-details;rfc9457;microservices;grpc;http</PackageTags>
+  </PropertyGroup>
+
+</Project>

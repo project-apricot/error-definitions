@@ -1,0 +1,140 @@
+---
+title: Usage
+description: Creating errors, asserting preconditions, gathering several at once, inspecting what you caught, and reading another service's failure.
+---
+
+# Usage
+
+Everything here is in the zero-dependency core, so it works in a worker or a console app as well as in
+a web service.
+
+## Creating an error
+
+One factory per kind, each taking the same three optional arguments.
+
+```csharp
+Err.NotFound()                                     // the kind is the whole answer
+Err.NotFound(ContentErrors.AuthorNotFound)         // a specific error within that kind
+Err.NotFound(ContentErrors.AuthorNotFound, "No author has that id.")
+Err.Validation(ContentErrors.InvalidLocale, payload: new Dictionary<string, object?>
+{
+    ["locale"] = locale,
+    ["allowed"] = new[] { "en", "hy" },
+})
+```
+
+Passing no code is fine and often right: `not_found` already says what happened. Such an error carries
+its kind's default — `NOT_FOUND`, `VALIDATION`, and so on, all listed in `ErrorCodes.All`.
+
+> **Warning.** A code must be upper snake case, or the factory throws `ArgumentException`. The first
+> argument is the *code*, so `Err.Internal($"The currency '{currency}' is not known")` puts a sentence
+> where a lookup key belongs, and a client keying its text off the code renders that sentence as an
+> identifier. For prose, name the argument: `Err.Internal(message: "…")`.
+
+## Throwing
+
+```csharp
+throw Err.NotFound(ContentErrors.AuthorNotFound).AsException();
+
+Err.NotFound(ContentErrors.AuthorNotFound).Throw();      // attributed as never returning
+```
+
+`Throw` is `[DoesNotReturn]`, so a call counts as terminating: it can stand as the last statement of a
+non-void method, or in a switch arm.
+
+## Preconditions
+
+A guard is usually a null check or a condition followed by a throw. `Ensure` is that in one line, and the
+compiler's flow analysis follows through.
+
+```csharp
+// Throws not_found. Afterwards the compiler knows author is not null.
+var author = Ensure.Found(await repository.Get(id), ContentErrors.AuthorNotFound);
+
+Ensure.Valid(ContentLocales.All.Contains(locale), ContentErrors.InvalidLocale);
+Ensure.Allowed(subject == author.Id, ContentErrors.DraftsForbidden);
+Ensure.Authenticated(context.User.Identity?.IsAuthenticated == true);
+Ensure.Precondition(order.Status == OrderStatus.Draft, OrderErrors.NotADraft);
+```
+
+## Several errors at once
+
+A caller filling in a form should not have to submit it once per mistake.
+
+```csharp
+new ErrorCollector()
+    .AddIf(string.IsNullOrWhiteSpace(input.Name), Err.Validation(AuthorErrors.InvalidName))
+    .AddIf(!input.Email.Contains('@', StringComparison.Ordinal), Err.Validation(AuthorErrors.InvalidEmail))
+    .ThrowIfAny();
+```
+
+`AddIf` builds the error either way, so a malformed code fails on the first run rather than only on the
+input that trips that branch.
+
+## Inspecting what you caught
+
+```csharp
+catch (ErrorDefinitionException failure) when (failure.HasKind(ErrorKinds.NotFound))
+{
+    return null;                                   // a missing thing is not an error here
+}
+
+failure.HasCode(ContentErrors.AuthorNotFound)
+failure.FirstError()                               // the one that decided the status
+failure.Errors                                     // never empty
+```
+
+`Errors` is never null and never empty, so there is no defensive `?? []` to write.
+
+## Reading another service's failure
+
+The half that makes the classification worth having. Nothing here throws while parsing.
+
+```csharp
+using var response = await client.GetAsync(uri, cancellationToken);
+
+// Rethrow the peer's failure as your own: its kind and code reach your handler unchanged, so a
+// not-found deep in a call chain is still a not-found at the edge.
+await response.EnsureNoErrorsAsync(cancellationToken);
+
+// Or look at it first.
+var problem = await response.ReadErrorProblemDetailsAsync(cancellationToken);
+
+if (problem is not null && problem.Errors[0].Kind == ErrorKinds.ResourceExhausted)
+{
+    await Task.Delay(backoff, cancellationToken);
+}
+```
+
+`ReadErrorProblemDetailsAsync` returns null for a successful response and a document for any failed
+one:
+
+| The peer sent | You get |
+| --- | --- |
+| a problem document | its kinds, codes, messages and payloads, unchanged |
+| a JSON body that is not one | one error classified from the status |
+| nothing at all — a bare 401, 404 or 429 | one error classified from the status |
+| an HTML error page from a proxy | one error classified from the status |
+| a body larger than 64 KiB | one error classified from the status |
+
+The status is always the one the transport reported, not whatever the document claimed.
+
+> **Note.** Classification by status is coarse on purpose: several kinds share a status, so the reverse
+> mapping picks one canonical kind each — 409 reads back as `already_exists`, 500 as `internal`.
+
+## Error codes across services
+
+Codes are strings, and the library deliberately has no registry for them. The convention that works is
+one class per service listing every code it can send, each prefixed with the service's own name:
+
+```csharp
+internal static class ContentErrors
+{
+    public const string AuthorNotFound = "CONTENT_AUTHOR_NOT_FOUND";
+    public const string InvalidLocale = "CONTENT_INVALID_LOCALE";
+}
+```
+
+The prefix keeps codes unique with no central authority, and one file per service makes a client's
+catalogue reviewable: the set it needs text for is that file plus `ErrorCodes.All`. Asserting that in a
+test is worth the five lines — a catalogue missing an entry renders the raw code to a user.

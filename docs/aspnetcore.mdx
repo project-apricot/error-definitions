@@ -1,0 +1,172 @@
+---
+title: ASP.NET Core
+description: Registration, teaching the pipeline about your own exceptions, what is logged, and where ordering still matters.
+---
+
+# ASP.NET Core
+
+## Registration
+
+```csharp
+using ApricotFramework.ErrorDefinitions.AspNetCore.Extensions;
+
+builder.Services.AddErrorDefinitions();
+
+var app = builder.Build();
+
+app.UseExceptionHandler();
+```
+
+That is the whole of it. Both overloads are idempotent, so a library may call one as well as the host
+without registering a second handler. The middleware is the host's to place, which is why the library does
+not add it.
+
+> **Note.** `AddErrorDefinitions` also calls `AddProblemDetails`, and that is required: the
+> exception-handling middleware refuses to be constructed without an error path, an inline handler or an
+> `IProblemDetailsService`, and `IExceptionHandler` registrations do not count. It does not put a body on
+> responses the framework writes itself.
+
+## There are no settings
+
+Nothing here reads configuration, deliberately. What a service answers when it fails is part of its
+contract, and a contract an environment variable can change is not one — the same error could mean
+different things in staging and production, without passing through a review.
+
+So an unrecognised exception is always `internal` / `INTERNAL`, and a kind this library does not define is
+always 500. The one option left is a pipeline-composition choice, which belongs in code beside the
+middleware it affects:
+
+```csharp
+builder.Services.AddErrorDefinitions(options => options.HandleUnmappedExceptions = false);
+```
+
+Off, an unrecognised exception is left to the rest of the pipeline; classified errors are still reported
+either way. See [Where ordering still matters](#where-ordering-still-matters) for when you would want that.
+
+An endpoint needing a status the kind does not map to answers directly rather than reaching for a setting:
+
+```csharp
+await httpContext.WriteErrorProblemDetailsAsync(
+    [Err.From("legally_blocked", MyErrors.LegallyBlocked)],
+    StatusCodes.Status451UnavailableForLegalReasons);
+```
+
+## Your own exceptions
+
+Three ways, in increasing order of effort.
+
+**Derive from the exception.** Understood with nothing registered at all.
+
+```csharp
+public sealed class CaptchaRejectedException : ErrorDefinitionException
+{
+    public CaptchaRejectedException(string reason)
+        : base([Err.Validation(CaptchaErrors.Rejected, payload: new Dictionary<string, object?>
+        {
+            ["reason"] = reason,
+        })])
+    {
+    }
+}
+```
+
+**One line, for a type that is only ever one kind.**
+
+```csharp
+builder.Services.MapExceptionToError<NotAuthenticatedException>(
+    ErrorKinds.NotAuthenticated,
+    AuthErrors.NoPrincipal);
+```
+
+**A mapper, when the failure knows something worth keeping.**
+
+```csharp
+internal sealed class CaptchaRejectedMapper : IExceptionErrorMapper
+{
+    public IReadOnlyList<ErrorDefinition>? Map(HttpContext httpContext, Exception exception)
+    {
+        return exception is CaptchaRejectedException rejected
+            ? [Err.Validation(CaptchaErrors.Rejected, payload: new Dictionary<string, object?>
+              {
+                  ["reason"] = rejected.Reason,
+              })]
+            : null;
+    }
+}
+
+builder.Services.AddExceptionErrorMapper<CaptchaRejectedMapper>();
+```
+
+Returning full error definitions rather than only a kind is the point of the interface: a rejected captcha
+knows *why*, and that belongs in the payload where a client can act on it.
+
+> **Warning.** Return null for an exception you do not recognise. Mappers are consulted in registration
+> order and the first non-null answer wins, so a mapper that answers everything silently disables every
+> mapper after it.
+
+A library should register its mapper from its own `Add*` method and leave `AddErrorDefinitions` to the
+host — a mapper with no handler does nothing, so say so in the library's own documentation.
+
+## What is logged
+
+The response says nothing about an unrecognised failure, so the log is its record.
+
+| Event | Level |
+| --- | --- |
+| an exception no mapper recognised | **Error**, with the exception |
+| a classified error the service threw | Debug |
+| the response had already started, so nothing could be written | Warning |
+| an exception left to the rest of the pipeline | Debug |
+
+The error-level entry matters more than it looks: the framework's middleware logs an exception only when
+*nothing* handles it, and this handler answers by default, so without it an unmapped failure would leave no
+trace anywhere.
+
+## Writing errors outside a handler
+
+```csharp
+await httpContext.WriteErrorProblemDetailsAsync([Err.NotFound(ContentErrors.AuthorNotFound)]);
+```
+
+Takes errors rather than an exception, so middleware or an endpoint can answer in the standard shape
+without throwing.
+
+## Where ordering still matters
+
+Libraries register mappers rather than competing handlers, so the cross-library hazard is gone. Three
+things still depend on order:
+
+- **Mapper precedence** — registration order, first non-null answer wins. Register before
+  `AddErrorDefinitions` to outrank the built-in mappers, after to defer to them.
+- **`HandleUnmappedExceptions` left on makes this handler answer everything**, so another
+  `IExceptionHandler` registered after it never runs. Turn it off if a host has one that must see
+  unrecognised exceptions.
+- **Where `UseExceptionHandler()` sits.** Anything that throws before it is not standardised at all.
+
+## Built-in behaviour
+
+Two mappers are always registered and cannot be switched off:
+
+- `ErrorDefinitionExceptionMapper` — the errors an `ErrorDefinitionException` already carries, subclasses
+  included.
+- `CancellationExceptionMapper` — separates the two failures that arrive as the same exception type: the
+  caller going away (`cancelled`, 499) from something this service waited on running out of time
+  (`timeout`, 504). Reporting a caller's own disconnect as a server error is what makes an error rate
+  unreadable.
+
+## Native exceptions
+
+There is no bundle of ready-made mappers for BCL exception types, and that is deliberate. Four map cleanly,
+and each is a one-liner you can add yourself:
+
+| Exception | Kind |
+| --- | --- |
+| `TimeoutException` | `timeout` |
+| `NotImplementedException`, `NotSupportedException` | `not_implemented` |
+| `BadHttpRequestException` | `validation` |
+
+The tempting ones are traps. `ArgumentException`, `ArgumentNullException`, `KeyNotFoundException`,
+`InvalidOperationException` and `UnauthorizedAccessException` almost always signal a **defect inside the
+service**, not something about the caller's request. Mapping them to 4xx tells the caller their request was
+wrong when the truth is that you have a bug, and moves the failure out of your 5xx rate so nothing pages
+anyone. Leave them unrecognised: `internal`, 500, and the exception in the log.
