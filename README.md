@@ -73,4 +73,4 @@ The sixteen kinds are `google.rpc.Code` under names that read better over HTTP, 
 classification maps to gRPC without a second table. `schemas/` publishes the whole contract as JSON
 for clients that are not .NET.
 
-Full documentation: <https://projectapricot.dev>
+Full documentation: <https://projectapricot.dev/docs/error-definitions>

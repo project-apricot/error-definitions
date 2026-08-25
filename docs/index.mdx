@@ -33,7 +33,7 @@ eleven that share their canonical name.
 
 That matters twice: the same classification maps onto gRPC with no second table, and the vocabulary was
 designed elsewhere and has already survived a large fleet. The full table, with each kind's default code
-and both statuses, is on the [Contract](contract) page.
+and both statuses, is on the [Contract](./contract.mdx) page.
 
 > **Note.** The set is open: a service may report a kind of its own, which travels intact and is reported
 > as 500. What it cannot do is change what one of these sixteen means — that is the part every other
@@ -58,4 +58,4 @@ a challenge may be a redirect to an identity provider and an OAuth endpoint's er
 specification. Flattening those into one shape would break them.
 
 That gap is closed on the reading side instead: a caller gets a classified error from any failed response,
-falling back to the status code when there is no document to read. See [Usage](usage).
+falling back to the status code when there is no document to read. See [Usage](./usage.mdx).
